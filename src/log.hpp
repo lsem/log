@@ -5,7 +5,9 @@
 
 #include <string_view>
 
+#ifdef __unix__
 #include <unistd.h>
+#endif //
 
 #include <algorithm>
 
@@ -97,7 +99,11 @@ void log_impl(log_level_t level, int line, std::string_view file_name,
         return;
     }
 
+#ifdef __unix__
     const auto at_tty = isatty(STDOUT_FILENO);
+#else
+    const auto at_tty = false;
+#endif
     const auto style = ([level, at_tty] {
         if (!at_tty) {
             return fmt::text_style {};
