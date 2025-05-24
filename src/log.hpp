@@ -72,7 +72,7 @@ fmt::color lighter(fmt::color c, double percents)
 } // namespace
 
 template <class... Args>
-void log_impl(log_level_t level, int line, std::string_view file_name,
+void log_impl(log_level_t level, int line, std::string_view file_name, std::string_view module_name,
     fmt::format_string<Args...> fmt, Args&&... args)
 {
     static bool log_level_read = false;
@@ -155,7 +155,7 @@ void log_impl(log_level_t level, int line, std::string_view file_name,
     auto curr_ms
         = (std::chrono::steady_clock::now() - g_local_epooch) / std::chrono::milliseconds(1);
 
-    fmt::print(stdout, style, "{:<4}:  {}  ", curr_ms, lvl_s);
+    fmt::print(stdout, style, "{:<4}: {}  {}  ", curr_ms, lvl_s, module_name);
     fmt::vprint(stdout, style, fmt, fmt::make_format_args(args...));
     fmt::print(stdout, darker_style, " ({}:{}) ", strip_fpath(file_name), line);
     fmt::print(stdout, "\n");
@@ -164,14 +164,25 @@ void log_impl(log_level_t level, int line, std::string_view file_name,
 inline void log_empty_line() { fmt::print(stdout, "\n"); }
 
 #define log_error(Fmt, ...)                                                                        \
-    log_impl(log_level_t::error, __LINE__, __FILE__, FMT_STRING(Fmt) __VA_OPT__(, ) __VA_ARGS__)
+    log_impl(log_level_t::error, __LINE__, __FILE__, lsem::log::details::module_name(),            \
+        FMT_STRING(Fmt) __VA_OPT__(, ) __VA_ARGS__)
 #define log_warning(Fmt, ...)                                                                      \
-    log_impl(log_level_t::warning, __LINE__, __FILE__, FMT_STRING(Fmt) __VA_OPT__(, ) __VA_ARGS__)
+    log_impl(log_level_t::warning, __LINE__, __FILE__, lsem::log::details::module_name(),          \
+        FMT_STRING(Fmt) __VA_OPT__(, ) __VA_ARGS__)
 #define log_info(Fmt, ...)                                                                         \
-    log_impl(log_level_t::info, __LINE__, __FILE__, FMT_STRING(Fmt) __VA_OPT__(, ) __VA_ARGS__)
+    log_impl(log_level_t::info, __LINE__, __FILE__, lsem::log::details::module_name(),             \
+        FMT_STRING(Fmt) __VA_OPT__(, ) __VA_ARGS__)
 
 #define log_debug(Fmt, ...)                                                                        \
-    log_impl(log_level_t::debug, __LINE__, __FILE__, FMT_STRING(Fmt) __VA_OPT__(, ) __VA_ARGS__)
+    log_impl(log_level_t::debug, __LINE__, __FILE__, lsem::log::details::module_name(),            \
+        FMT_STRING(Fmt) __VA_OPT__(, ) __VA_ARGS__)
+
+#define LOG_MODULE_NAME(Name)                                                                      \
+    namespace lsem::log::details {                                                                 \
+        namespace {                                                                                \
+            const char* module_name() { return Name; }                                             \
+        }                                                                                          \
+    }
 
 // #ifndef NDEBUG
 // #define log_debug(Fmt, ...) \
