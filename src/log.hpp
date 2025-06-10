@@ -5,7 +5,7 @@
 
 #include <string_view>
 
-#ifdef __unix__
+#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
 #include <unistd.h>
 #endif //
 
@@ -93,7 +93,7 @@ void log_impl(log_level_t level, int line, std::string_view file_name,
     return;
   }
 
-#ifdef __unix__
+#if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
   const auto at_tty = isatty(STDOUT_FILENO);
 #else
   const auto at_tty = false;
