@@ -94,7 +94,7 @@ void log_impl(log_level_t level, int line, std::string_view file_name,
   }
 
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
-  const auto at_tty = isatty(STDOUT_FILENO);
+  const auto at_tty = isatty(STDERR_FILENO);
 #else
   const auto at_tty = false;
 #endif
@@ -149,13 +149,13 @@ void log_impl(log_level_t level, int line, std::string_view file_name,
   auto curr_ms = (std::chrono::steady_clock::now() - g_local_epooch) /
                  std::chrono::milliseconds(1);
 
-  fmt::print(stdout, style, "{:<4}: {}  {}  ", curr_ms, lvl_s, module_name);
-  fmt::vprint(stdout, style, fmt, fmt::make_format_args(args...));
-  fmt::print(stdout, darker_style, " ({}:{}) ", strip_fpath(file_name), line);
-  fmt::print(stdout, "\n");
+  fmt::print(stderr, style, "{:<4}: {}  {}  ", curr_ms, lvl_s, module_name);
+  fmt::vprint(stderr, style, fmt, fmt::make_format_args(args...));
+  fmt::print(stderr, darker_style, " ({}:{}) ", strip_fpath(file_name), line);
+  fmt::print(stderr, "\n");
 }
 
-inline void log_empty_line() { fmt::print(stdout, "\n"); }
+inline void log_empty_line() { fmt::print(stderr, "\n"); }
 
 #ifdef _MSC_VER
 #define log_error(Fmt, ...)                                                    \
