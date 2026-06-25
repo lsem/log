@@ -21,6 +21,8 @@ enum class log_level_t {
 extern log_level_t g_current_level;
 extern std::chrono::steady_clock::time_point g_local_epooch;
 
+void set_log_level(log_level_t lvl);
+
 constexpr std::string_view strip_fpath(std::string_view fpath) {
   size_t last_slash_pos = 0;
   for (size_t i = 0; i < fpath.size(); ++i) {
