@@ -200,12 +200,12 @@ void log_impl(log_level_t level, int line, std::string_view file_name,
   auto tid = current_native_thread_id();
 
   auto out = fmt::memory_buffer();
-  fmt::format_to(std::back_inserter(out), style, "{}: {} {} T{}  ", curr_ms,
-                 lvl_s, module_name, tid);
+  fmt::format_to(std::back_inserter(out), style, "{}: {} {}  ", curr_ms, lvl_s,
+                 module_name);
   fmt::format_to(std::back_inserter(out), style, "{}",
                  fmt::vformat(fmt, fmt::make_format_args(args...)));
-  fmt::format_to(std::back_inserter(out), darker_style, " ({}:{}) ",
-                 strip_fpath(file_name), line);
+  fmt::format_to(std::back_inserter(out), darker_style, " ({}:{}) T{}",
+                 strip_fpath(file_name), line, tid);
   fmt::format_to(std::back_inserter(out), "\n");
 
   ul.lock();
