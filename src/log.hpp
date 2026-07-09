@@ -1,15 +1,52 @@
 #pragma once
-#include <chrono>
+
 #include <fmt/color.h>
 #include <fmt/format.h>
-
-#include <string_view>
 
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
 #include <unistd.h>
 #endif //
 
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
+#elif defined(__linux__)
+#include <sys/syscall.h>
+#include <unistd.h>
+
+#elif defined(__APPLE__) && defined(__MACH__)
+#include <pthread.h>
+#else
+#error "current_native_thread_id() is not implemented for this platform"
+#endif
+inline std::uint64_t current_native_thread_id() noexcept {
+#if defined(_WIN32)
+  return static_cast<std::uint64_t>(::GetCurrentThreadId());
+#elif defined(__linux__)
+  return static_cast<std::uint64_t>(::syscall(SYS_gettid));
+#elif defined(__APPLE__) && defined(__MACH__)
+  std::uint64_t tid = 0;
+  pthread_threadid_np(nullptr, &tid);
+  return tid;
+#endif
+}
+
 #include <algorithm>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <iterator>
+#include <mutex>
+#include <string>
+#include <string_view>
 
 enum class log_level_t {
   error,
@@ -20,21 +57,28 @@ enum class log_level_t {
 
 extern log_level_t g_current_level;
 extern std::chrono::steady_clock::time_point g_local_epooch;
+extern std::mutex g_lock;
+extern bool g_log_level_read;
 
 void set_log_level(log_level_t lvl);
 
 constexpr std::string_view strip_fpath(std::string_view fpath) {
-  size_t last_slash_pos = 0;
+  size_t last_slash_pos = std::string_view::npos;
   for (size_t i = 0; i < fpath.size(); ++i) {
-    if (fpath[i] == '/') {
+    if (fpath[i] == '/' || fpath[i] == '\\') {
       last_slash_pos = i;
     }
   }
-  fpath.remove_prefix(last_slash_pos + 1);
+
+  if (last_slash_pos != std::string_view::npos) {
+    fpath.remove_prefix(last_slash_pos + 1);
+  }
   return fpath;
 }
 
 static_assert(strip_fpath("a/b/c") == "c");
+static_assert(strip_fpath("main.cpp") == "main.cpp");
+static_assert(strip_fpath("a\\b\\c.cpp") == "c.cpp");
 
 namespace {
 struct rgb_color {
@@ -57,12 +101,11 @@ fmt::color from_rgb(rgb_color c) {
   return static_cast<fmt::color>(c.r << 16 | c.g << 8 | c.b);
 }
 
-fmt::color lighter(fmt::color c, double percents) {
-  // assert(percents >= 0.0 && percents <= 1.0);
+fmt::color adjust_brightness(fmt::color c, double percents) {
   auto [r, g, b] = to_rgb(c);
-  r = std::clamp(r + static_cast<unsigned>(r * percents), 0u, 255u);
-  g = std::clamp(g + static_cast<unsigned>(g * percents), 0u, 255u);
-  b = std::clamp(b + static_cast<unsigned>(b * percents), 0u, 255u);
+  r = std::clamp(r + static_cast<int>(r * percents), 0, 255);
+  g = std::clamp(g + static_cast<int>(g * percents), 0, 255);
+  b = std::clamp(b + static_cast<int>(b * percents), 0, 255);
   return from_rgb(rgb_color(r, g, b));
 }
 } // namespace
@@ -71,8 +114,9 @@ template <class... Args>
 void log_impl(log_level_t level, int line, std::string_view file_name,
               std::string_view module_name, fmt::format_string<Args...> fmt,
               Args &&...args) {
-  static bool log_level_read = false;
-  if (!log_level_read) {
+
+  std::unique_lock<std::mutex> ul{g_lock};
+  if (!g_log_level_read) {
     std::string level_val;
     if (std::getenv("LOG")) {
       level_val = std::getenv("LOG");
@@ -88,12 +132,14 @@ void log_impl(log_level_t level, int line, std::string_view file_name,
     } else if (std::getenv("DEBUG")) {
       g_current_level = log_level_t::debug;
     }
-    log_level_read = true;
+    g_log_level_read = true;
   }
 
   if (static_cast<int>(level) > static_cast<int>(g_current_level)) {
     return;
   }
+
+  ul.unlock();
 
 #if defined(__unix__) || (defined(__APPLE__) && defined(__MACH__))
   const auto at_tty = isatty(STDERR_FILENO);
@@ -122,9 +168,9 @@ void log_impl(log_level_t level, int line, std::string_view file_name,
     }
     switch (level) {
     case log_level_t::debug:
-      return fmt::fg(lighter(fmt::color::gray, -0.5));
+      return fmt::fg(adjust_brightness(fmt::color::gray, -0.5));
     case log_level_t::info:
-      return fmt::fg(lighter(fmt::color::light_gray, -0.5));
+      return fmt::fg(adjust_brightness(fmt::color::light_gray, -0.5));
     case log_level_t::warning:
       return fmt::bg(fmt::color::yellow) | fmt::fg(fmt::color::black);
     case log_level_t::error:
@@ -151,13 +197,27 @@ void log_impl(log_level_t level, int line, std::string_view file_name,
   auto curr_ms = (std::chrono::steady_clock::now() - g_local_epooch) /
                  std::chrono::milliseconds(1);
 
-  fmt::print(stderr, style, "{:<4}: {}  {}  ", curr_ms, lvl_s, module_name);
-  fmt::vprint(stderr, style, fmt, fmt::make_format_args(args...));
-  fmt::print(stderr, darker_style, " ({}:{}) ", strip_fpath(file_name), line);
-  fmt::print(stderr, "\n");
+  auto tid = current_native_thread_id();
+
+  auto out = fmt::memory_buffer();
+  fmt::format_to(std::back_inserter(out), style, "{}: {} {} T{}  ", curr_ms,
+                 lvl_s, module_name, tid);
+  fmt::format_to(std::back_inserter(out), style, "{}",
+                 fmt::vformat(fmt, fmt::make_format_args(args...)));
+  fmt::format_to(std::back_inserter(out), darker_style, " ({}:{}) ",
+                 strip_fpath(file_name), line);
+  fmt::format_to(std::back_inserter(out), "\n");
+
+  ul.lock();
+  std::fwrite(out.data(), 1, out.size(), stderr);
 }
 
-inline void log_empty_line() { fmt::print(stderr, "\n"); }
+inline void log_empty_line() {
+  auto out = fmt::memory_buffer();
+  fmt::format_to(std::back_inserter(out), "\n");
+  std::lock_guard<std::mutex> lock{g_lock};
+  std::fwrite(out.data(), 1, out.size(), stderr);
+}
 
 #ifdef _MSC_VER
 #define log_error(Fmt, ...)                                                    \
