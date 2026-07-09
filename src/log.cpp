@@ -9,5 +9,4 @@
 void set_log_level(log_level_t lvl) {
   std::unique_lock<std::mutex> ul{g_lock};
   g_current_level = lvl;
-  g_log_level_read = true;
 }
